@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Deepseek Account</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            margin-bottom: 20px;
+        }
+        .form-container {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button[type="submit"] {
+            background-color: #4CAF50;
+            color: white;
+        }
+        button[type="button"] {
+            background-color: #f0f0f0;
+        }
+        .error-message {
+            color: #ff0000;
+            margin-top: 10px;
+            display: none;
+        }
+        .success-message {
+            color: #4CAF50;
+            margin-top: 10px;
+            display: none;
+        }
+        .progress-container {
+            display: none;
+            margin-top: 20px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+        }
+        .progress-step {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            opacity: 0.5;
+            transition: opacity 0.3s ease;
+        }
+        .progress-step.active {
+            opacity: 1;
+        }
+        .progress-step .icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background-color: #ddd;
+            margin-right: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: white;
+        }
+        .progress-step.done .icon {
+            background-color: #4CAF50;
+        }
+        .progress-step.active .icon {
+            background-color: #2196F3;
+            animation: pulse 1.5s infinite;
+        }
+        .progress-step.error .icon {
+            background-color: #f44336;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Add Deepseek Account</h1>
+    </div>
+    
+    <div class="form-container">
+        <form id="accountForm">
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            
+            <div class="button-group">
+                <button type="submit">Add Account</button>
+                <button type="button" onclick="window.location.href='/accounts'">Cancel</button>
+            </div>
+        </form>
+        
+        <div id="progressContainer" class="progress-container">
+            <h3>Adding Account...</h3>
+            <div id="progressSteps"></div>
+        </div>
+        
+        <div id="errorMessage" class="error-message"></div>
+        <div id="successMessage" class="success-message"></div>
+    </div>
+
+    <script>
+        const form = document.getElementById('accountForm');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressSteps = document.getElementById('progressSteps');
+        const errorMessage = document.getElementById('errorMessage');
+        const successMessage = document.getElementById('successMessage');
+
+        function createOrUpdateStep(text, status = 'active') {
+            const stepId = text.toLowerCase().replace(/[^a-z0-9]/g, '-');
+            let step = document.getElementById(stepId);
+            
+            if (!step) {
+                step = document.createElement('div');
+                step.id = stepId;
+                step.className = `progress-step ${status}`;
+                step.innerHTML = `
+                    <div class="icon">⋯</div>
+                    <div class="text">${text}</div>
+                `;
+                progressSteps.appendChild(step);
+            } else {
+                step.className = `progress-step ${status}`;
+            }
+
+            if (status === 'done') {
+                step.querySelector('.icon').textContent = '✓';
+            } else if (status === 'error') {
+                step.querySelector('.icon').textContent = '✕';
+            }
+
+            return step;
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const submitButton = form.querySelector('button[type="submit"]');
+            errorMessage.style.display = 'none';
+            successMessage.style.display = 'none';
+            progressContainer.style.display = 'block';
+            progressSteps.innerHTML = '';
+            submitButton.disabled = true;
+            
+            try {
+                const response = await fetch('/accounts/add', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: document.getElementById('email').value,
+                        password: document.getElementById('password').value,
+                    }),
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let currentStep = null;
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    const events = decoder.decode(value).split('\n\n');
+                    for (const event of events) {
+                        if (!event.trim()) continue;
+                        
+                        const data = JSON.parse(event.replace('data: ', ''));
+                        
+                        if (data.error) {
+                            if (currentStep) {
+                                createOrUpdateStep(currentStep, 'error');
+                            }
+                            throw new Error(data.error);
+                        }
+                        
+                        if (data.step) {
+                            if (currentStep) {
+                                createOrUpdateStep(currentStep, 'done');
+                            }
+                            currentStep = data.step;
+                            createOrUpdateStep(data.step, 'active');
+                        }
+                        
+                        if (data.done) {
+                            if (currentStep) {
+                                createOrUpdateStep(currentStep, 'done');
+                            }
+                            successMessage.textContent = 'Account added successfully!';
+                            successMessage.style.display = 'block';
+                            
+                            setTimeout(() => {
+                                window.location.href = '/accounts';
+                            }, 2000);
+                        }
+                    }
+                }
+            } catch (error) {
+                errorMessage.textContent = error.message;
+                errorMessage.style.display = 'block';
+                submitButton.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html> 

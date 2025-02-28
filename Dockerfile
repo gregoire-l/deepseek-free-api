@@ -1,4 +1,4 @@
-FROM node:lts AS BUILD_IMAGE
+FROM node:lts
 
 WORKDIR /app
 

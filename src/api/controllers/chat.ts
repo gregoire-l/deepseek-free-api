@@ -116,7 +116,6 @@ function releaseWorker(worker: (Worker & { inUse?: boolean })) {
 async function getIPAddress() {
   if (ipAddress) return ipAddress;
   
-  // List of IP lookup services
   const ipServices = [
     'https://api.ipify.org?format=json',
     'https://api.ip.sb/ip',
@@ -127,18 +126,13 @@ async function getIPAddress() {
   for (const service of ipServices) {
     try {
       const response = await axios.get(service, {
-        timeout: 5000,
-        headers: {
-          'User-Agent': cloudflareAuth.getCookieString['User-Agent']
-        }
+        timeout: 5000
       });
 
       let ip;
       if (typeof response.data === 'object') {
-        // Handle JSON responses (like ipify)
         ip = response.data.ip;
       } else {
-        // Handle plain text responses (like ifconfig.me)
         ip = response.data.trim();
       }
 
@@ -153,7 +147,6 @@ async function getIPAddress() {
     }
   }
 
-  // If all services fail, throw an error
   throw new APIException(EX.API_REQUEST_FAILED, 'Failed to get IP address from all services');
 }
 
@@ -176,9 +169,7 @@ async function requestToken(refreshToken: string) {
       "https://chat.deepseek.com/api/v0/users/current",
       {
         headers: {
-          Authorization: `Bearer ${refreshToken}`,
-          ...cloudflareAuth.getHeaders(),
-          Cookie: cloudflareAuth.getCookieString()
+          Authorization: `Bearer ${refreshToken}`
         },
         timeout: 15000,
         validateStatus: () => true,
@@ -254,7 +245,6 @@ async function createSession(model: string, refreshToken: string): Promise<strin
     {
       headers: {
         Authorization: `Bearer ${token}`,
-        ...cloudflareAuth.getHeaders(),
         Cookie: cloudflareAuth.getCookieString()
       },
       timeout: 15000,
@@ -300,12 +290,17 @@ async function getChallengeResponse(refreshToken: string, targetPath: string) {
     target_path: targetPath
   }, {
     headers: {
-      Authorization: `Bearer ${token}`,
-      ...cloudflareAuth.getHeaders(),
-      Cookie: cloudflareAuth.getCookieString()
+      Authorization: `Bearer ${refreshToken}`,
     },
     timeout: 15000,
     validateStatus: () => true,
+  });
+  console.log('Challenge Response:', {
+    status: result.status,
+    statusText: result.statusText,
+    headers: result.headers,
+    data: result.data,
+    config: result.config
   });
   const { biz_data: { challenge } } = checkResult(result, refreshToken);
   return challenge;
@@ -352,12 +347,12 @@ async function createCompletion(
     // if(isSearchModel && isThinkingModel)
     //   throw new APIException(EX.API_REQUEST_FAILED, '深度思考和联网搜索不能同时使用');
 
-    if (isThinkingModel) {
-      const thinkingQuota = await getThinkingQuota(refreshToken);
-      if (thinkingQuota <= 0) {
-        throw new APIException(EX.API_REQUEST_FAILED, '深度思考配额不足');
-      }
-    }
+    // if (isThinkingModel) {
+    //   const thinkingQuota = await getThinkingQuota(refreshToken);
+    //   if (thinkingQuota <= 0) {
+    //     throw new APIException(EX.API_REQUEST_FAILED, '深度思考配额不足');
+    //   }
+    // }
 
     const challengeResponse = await getChallengeResponse(refreshToken, '/api/v0/chat/completion');
     const challenge = await answerChallenge(challengeResponse, '/api/v0/chat/completion');
@@ -377,11 +372,8 @@ async function createCompletion(
       {
         headers: {
           Authorization: `Bearer ${token}`,
-          ...cloudflareAuth.getHeaders(),
-          Cookie: cloudflareAuth.getCookieString(),
           'X-Ds-Pow-Response': challenge
         },
-        // 120秒超时
         timeout: 120000,
         validateStatus: () => true,
         responseType: "stream",
@@ -463,12 +455,12 @@ async function createCompletionStream(
     // if(isSearchModel && isThinkingModel)
     //   throw new APIException(EX.API_REQUEST_FAILED, '深度思考和联网搜索不能同时使用');
 
-    if (isThinkingModel) {
-      const thinkingQuota = await getThinkingQuota(refreshToken);
-      if (thinkingQuota <= 0) {
-        throw new APIException(EX.API_REQUEST_FAILED, '深度思考配额不足');
-      }
-    }
+    // if (isThinkingModel) {
+    //   const thinkingQuota = await getThinkingQuota(refreshToken);
+    //   if (thinkingQuota <= 0) {
+    //     throw new APIException(EX.API_REQUEST_FAILED, '深度思考配额不足');
+    //   }
+    // }
 
     const challengeResponse = await getChallengeResponse(refreshToken, '/api/v0/chat/completion');
     const challenge = await answerChallenge(challengeResponse, '/api/v0/chat/completion');
@@ -481,10 +473,23 @@ async function createCompletionStream(
 
     const headers = {
       Authorization: `Bearer ${token}`,
-      ...cloudflareAuth.getHeaders(),
-      Cookie: cloudflareAuth.getCookieString(),
-      'X-Ds-Pow-Response': challenge
+      'x-ds-Pow-Response': challenge
     };
+
+    // Log complete request details
+    logger.info('=== DEEPSEEK COMPLETION REQUEST ===');
+    logger.info('URL: https://chat.deepseek.com/api/v0/chat/completion');
+    logger.info('Headers:', JSON.stringify(headers, null, 2));
+    logger.info('Body:', JSON.stringify({
+      chat_session_id: sessionId,
+      parent_message_id: refParentMsgId || null,
+      prompt,
+      challenge_response: null,
+      ref_file_ids: [],
+      search_enabled: isSearchModel,
+      thinking_enabled: isThinkingModel
+    }, null, 2));
+    logger.info('=== END REQUEST ===');
 
     const result = await axios.post(
       "https://chat.deepseek.com/api/v0/chat/completion",
@@ -571,11 +576,10 @@ async function createCompletionStream(
  */
 
 function messagesPrepare(messages: any[]): string {
-  // 处理消息内容
+  // Traiter les messages
   const processedMessages = messages.map(message => {
     let text: string;
     if (Array.isArray(message.content)) {
-      // 过滤出 type 为 "text" 的项并连接文本
       const texts = message.content
         .filter((item: any) => item.type === "text")
         .map((item: any) => item.text);
@@ -588,7 +592,7 @@ function messagesPrepare(messages: any[]): string {
 
   if (processedMessages.length === 0) return '';
 
-  // 合并连续相同角色的消息
+  // Fusionner les messages consécutifs du même rôle
   const mergedBlocks: { role: string; text: string }[] = [];
   let currentBlock = { ...processedMessages[0] };
 
@@ -603,15 +607,15 @@ function messagesPrepare(messages: any[]): string {
   }
   mergedBlocks.push(currentBlock);
 
-  // 添加标签并连接结果
+  // Ajouter les balises et joindre les résultats
   return mergedBlocks
     .map((block, index) => {
       if (block.role === "assistant") {
-        return `<｜Assistant｜>${block.text}<｜end▁of▁sentence｜>`;
+        return `<｜Assistant｜>${block.text}`;
       }
       
       if (block.role === "user" || block.role === "system") {
-        return index > 0 ? `<｜User｜>${block.text}` : block.text;
+        return index > 0 ? `\`${block.text}` : block.text;
       }
 
       return block.text;
@@ -886,7 +890,6 @@ async function getTokenLiveStatus(refreshToken: string) {
     {
       headers: {
         Authorization: `Bearer ${token}`,
-        ...cloudflareAuth.getHeaders(),
         Cookie: cloudflareAuth.getCookieString()
       },
       timeout: 15000,
@@ -1263,7 +1266,6 @@ async function sendEvents(refConvId: string, refreshToken: string) {
     }, {
       headers: {
         Authorization: `Bearer ${token}`,
-        ...cloudflareAuth.getHeaders(),
         Referer: `https://chat.deepseek.com/a/chat/s/${refConvId}`,
         Cookie: cloudflareAuth.getCookieString()
       },
@@ -1282,15 +1284,29 @@ async function sendEvents(refConvId: string, refreshToken: string) {
  */
 async function getThinkingQuota(refreshToken: string) {
   try {
+    logger.info('=== DEEPSEEK QUOTA REQUEST ===');
+    logger.info('URL: https://chat.deepseek.com/api/v0/users/feature_quota');
+    logger.info('Headers:', JSON.stringify({
+      Authorization: `Bearer ${refreshToken}`,
+      Cookie: cloudflareAuth.getCookieString()
+    }, null, 2));
+    logger.info('=== END REQUEST ===');
+
     const response = await axios.get('https://chat.deepseek.com/api/v0/users/feature_quota', {
       headers: {
         Authorization: `Bearer ${refreshToken}`,
-        ...cloudflareAuth.getHeaders(),
         Cookie: cloudflareAuth.getCookieString()
       },
       timeout: 15000,
       validateStatus: () => true,
     });
+
+    logger.info('=== DEEPSEEK QUOTA RESPONSE ===');
+    logger.info('Status:', response.status);
+    logger.info('Headers:', JSON.stringify(response.headers, null, 2));
+    logger.info('Body:', JSON.stringify(response.data, null, 2));
+    logger.info('=== END RESPONSE ===');
+
     const { biz_data } = checkResult(response, refreshToken);
     if (!biz_data) return 0;
     const { quota, used } = biz_data.thinking;
@@ -1314,7 +1330,6 @@ async function fetchAppVersion(): Promise<string> {
       timeout: 5000,
       validateStatus: () => true,
       headers: {
-        ...cloudflareAuth.getHeaders(),
         Cookie: cloudflareAuth.getCookieString()
       }
     });

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deepseek Accounts</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .add-button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .accounts-list {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .account-item {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .account-item:last-child {
+            border-bottom: none;
+        }
+        .no-accounts {
+            text-align: center;
+            color: #666;
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Deepseek Accounts</h1>
+        <a href="/accounts/add" class="add-button">Add Account</a>
+    </div>
+    
+    <div class="accounts-list" id="accountsList">
+        <div class="no-accounts">Loading accounts...</div>
+    </div>
+
+    <script>
+        async function loadAccounts() {
+            try {
+                const response = await fetch('/accounts/list');
+                const data = await response.json();
+                
+                const accountsList = document.getElementById('accountsList');
+                
+                if (!data.accounts || data.accounts.length === 0) {
+                    accountsList.innerHTML = '<div class="no-accounts">No accounts added yet</div>';
+                    return;
+                }
+                
+                accountsList.innerHTML = data.accounts.map(account => `
+                    <div class="account-item">
+                        <div>
+                            <strong>${account.email}</strong>
+                            <br>
+                            <small>Last updated: ${new Date(account.lastUpdate).toLocaleString()}</small>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to load accounts:', error);
+                document.getElementById('accountsList').innerHTML = 
+                    '<div class="no-accounts">Failed to load accounts</div>';
+            }
+        }
+
+        // Load accounts when page loads
+        loadAccounts();
+    </script>
+</body>
+</html> 
