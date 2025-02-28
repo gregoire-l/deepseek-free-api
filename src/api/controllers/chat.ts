@@ -33,15 +33,18 @@ const FAKE_HEADERS = {
   Priority: "u=1, i",
   Referer: "https://chat.deepseek.com/",
   "Sec-Ch-Ua":
-    '"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"',
+    '"Chromium";v="133", "Google Chrome";v="133", "Not?A_Brand";v="99"',
   "Sec-Ch-Ua-Mobile": "?0",
   "Sec-Ch-Ua-Platform": '"Windows"',
   "Sec-Fetch-Dest": "empty",
   "Sec-Fetch-Mode": "cors",
   "Sec-Fetch-Site": "same-origin",
   "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-  "X-App-Version": "20241129.1"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+  "X-App-Version": "20241129.1",
+  "X-Client-Locale": "zh-CN",
+  "X-Client-Platform": "web",
+  "X-Client-Version": "1.0.0-always",
 };
 const EVENT_COMMIT_ID = '41e9c7b1';
 // 当前IP地址
@@ -249,7 +252,7 @@ async function createSession(model: string, refreshToken: string): Promise<strin
   const result = await axios.post(
     "https://chat.deepseek.com/api/v0/chat_session/create",
     {
-      agent: "chat",
+      character_id: null
     },
     {
       headers: {
@@ -658,7 +661,7 @@ async function receiveStream(model: string, stream: any, refConvId?: string): Pr
       choices: [
         {
           index: 0,
-          message: { role: "assistant", content: "" },
+          message: { role: "assistant", content: "", reasoning_content: "" },
           finish_reason: "stop",
         },
       ],
@@ -681,7 +684,7 @@ async function receiveStream(model: string, stream: any, refConvId?: string): Pr
           refContent += searchResults.map(item => `Search result ${item.title} - ${item.url}`).join('\n') + '\n\n';
           return;
         }
-        if (result.choices[0].delta.type === "thinking") {
+        if (isFoldModel && result.choices[0].delta.type === "thinking") {
           if (!thinking && isThinkingModel && !isSilentModel) {
             thinking = true;
             data.choices[0].message.content += isFoldModel ? "<details><summary>Thinking process</summary><pre>" : "[Thinking started]\n";
@@ -689,12 +692,17 @@ async function receiveStream(model: string, stream: any, refConvId?: string): Pr
           if (isSilentModel)
             return;
         }
-        else if (thinking && isThinkingModel && !isSilentModel) {
+        else if (isFoldModel && thinking && isThinkingModel && !isSilentModel) {
           thinking = false;
           data.choices[0].message.content += isFoldModel ? "</pre></details>" : "\n\n[Thinking ended]\n";
         }
-        if (result.choices[0].delta.content)
-          data.choices[0].message.content += result.choices[0].delta.content;
+        if (result.choices[0].delta.content) {
+          if(result.choices[0].delta.type === "thinking" && !isFoldModel){
+            data.choices[0].message.reasoning_content += result.choices[0].delta.content;
+          }else {
+            data.choices[0].message.content += result.choices[0].delta.content;
+          }
+        }
         if (result.choices && result.choices[0] && result.choices[0].finish_reason === "stop") {
           data.choices[0].message.content = data.choices[0].message.content.replace(/^\n+/, '').replace(/\[citation:\d+\]/g, '') + (refContent ? `\n\n搜索结果来自：\n${refContent}` : '');
           resolve(data);
@@ -740,7 +748,7 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
         choices: [
           {
             index: 0,
-            delta: { role: "assistant", content: "" },
+            delta: { role: "assistant", content: "" , reasoning_content: "" },
             finish_reason: null,
           },
         ],
@@ -776,7 +784,7 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
         }
         return;
       }
-      if (result.choices[0].delta.type === "thinking") {
+      if (isFoldModel && result.choices[0].delta.type === "thinking") {
         if (!thinking && isThinkingModel && !isSilentModel) {
           thinking = true;
           transStream.write(`data: ${JSON.stringify({
@@ -796,7 +804,7 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
         if (isSilentModel)
           return;
       }
-      else if (thinking && isThinkingModel && !isSilentModel) {
+      else if (isFoldModel && thinking && isThinkingModel && !isSilentModel) {
         thinking = false;
         transStream.write(`data: ${JSON.stringify({
           id: `${refConvId}@${result.message_id}`,
@@ -816,6 +824,11 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
       if (!result.choices[0].delta.content)
         return;
 
+      const deltaContent = result.choices[0].delta.content.replace(/\[citation:\d+\]/g, '');
+      const delta = result.choices[0].delta.type === "thinking" && !isFoldModel
+          ? { role: "assistant", reasoning_content: deltaContent }
+          : { role: "assistant", content: deltaContent };
+
       transStream.write(`data: ${JSON.stringify({
         id: `${refConvId}@${result.message_id}`,
         model: result.model,
@@ -823,12 +836,13 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
         choices: [
           {
             index: 0,
-            delta: { role: "assistant", content: result.choices[0].delta.content.replace(/\[citation:\d+\]/g, '') },
+            delta,
             finish_reason: null,
           },
         ],
         created,
       })}\n\n`);
+
       if (result.choices && result.choices[0] && result.choices[0].finish_reason === "stop") {
         transStream.write(`data: ${JSON.stringify({
           id: `${refConvId}@${result.message_id}`,
